@@ -29,4 +29,4 @@ class Colors:
 
     @staticmethod
     def print_purple(message):
-        print(f'{Colors.UNDERLINE}{message}{Colors.ENDC}')
+        print(f'{Colors.HEADER}{message}{Colors.ENDC}')

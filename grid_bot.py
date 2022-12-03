@@ -84,11 +84,11 @@ class GridBot:
 
     def checking_for_open_buy_orders(self):
 
-        self.closed_order_ids = []
+        # Colors.print_green("BUY")
 
         for buy_order in self.buy_orders:
 
-            Colors.print_cyan(f"Checking for open buy orders {Colors.BOLD}{buy_order['id']}")
+            # Colors.print_cyan(f"   Checking for open BUY orders {Colors.BOLD}{buy_order['id']}")
 
             order = self.try_fetch_order(buy_order['id'], self.symbol)
 
@@ -115,17 +115,21 @@ class GridBot:
 
     def checking_for_open_sell_orders(self):
 
+        # Colors.print_red('SELL')
+
         for sell_order in self.sell_orders:
 
-            print(f'Checking for open buy orders {sell_order["id"]}')
+            # Colors.print_cyan(f'   Checking for open SELL orders {Colors.BOLD}{sell_order["id"]}')
 
             order = self.try_fetch_order(sell_order['id'], self.symbol)
 
             order_info = order['info']
-            print(f"status: {order_info['status']}")
+
             if order_info['status'] == self.closed_order_status:
                 self.closed_order_ids.append(order['id'])
+
                 price = float(order_info["price"])
+
                 Colors.print_purple(f'SELL order filled / executed at {order_info["price"]}')
                 new_buy_price = price - self.grid_size
                 self.create_limit_buy_order(new_buy_price)
@@ -137,64 +141,8 @@ class GridBot:
 
         Colors.print_blue(f'creating new limit BUY order at {new_buy_price:.4f}')
 
-        new_buy_order = self.exchange.create_limit_sell_order(self.symbol, self.position_size, new_buy_price)
-        self.sell_orders.append(new_buy_order)
-
-    def checking_for_open_buy_and_sell_order_old(self):
-
-        while True:
-
-            self.closed_order_ids = []
-
-            for buy_order in self.buy_orders:
-
-                print(f"Checking for open buy orders {buy_order['id']}")
-
-                order = self.try_fetch_order(buy_order['id'], self.symbol)
-
-                order_info = order['info']
-                print(f"status: {order_info['status']}")
-                if order_info['status'] == self.closed_order_status:
-                    self.closed_order_ids.append(order['id'])
-                    print(f'BUY order executed at {order_info["price"]}')
-                    new_sell_price = float(order_info['price']) + self.grid_size
-                    print(f'creating new limit sell order at {new_sell_price:.4f}')
-                    new_sell_order = self.exchange.create_limit_sell_order(self.symbol, self.position_size, new_sell_price)
-                    self.sell_orders.append(new_sell_order)
-
-                if order_info['status'] == self.canceled_order_status:
-                    self.closed_order_ids.append(order['id'])
-
-                # time.sleep(self.check_orders_frequency)
-
-            for sell_order in self.sell_orders:
-
-                print(f'Checking for open buy orders {sell_order["id"]}')
-
-                order = self.try_fetch_order(sell_order['id'], self.symbol)
-
-                order_info = order['info']
-                print(f"status: {order_info['status']}")
-                if order_info['status'] == self.closed_order_status:
-                    self.closed_order_ids.append(order['id'])
-                    print(f'SELL order executed at {order_info["price"]}')
-                    new_buy_price = float(order_info["price"]) - self.grid_size
-                    print(f'creating new limit buy order at {new_buy_price:.4f}')
-                    new_buy_order = self.exchange.create_limit_buy_order(self.symbol, self.position_size, new_buy_price)
-                    self.buy_orders.append(new_buy_order)
-
-                if order_info['status'] == self.canceled_order_status:
-                    self.closed_order_ids.append(order['id'])
-
-                # time.sleep(self.check_orders_frequency)
-
-            self.clean_orders_lists()
-            time.sleep(self.check_orders_frequency)
-
-            terminate, type_of_terminate, message = self.check_bot_termination_condition()
-            if terminate:
-                print(f'{Colors.OKBLUE}End of small loop{Colors.ENDC}')
-                return type_of_terminate
+        new_buy_order = self.exchange.create_limit_buy_order(self.symbol, self.position_size, new_buy_price)
+        self.buy_orders.append(new_buy_order)
 
     def clean_orders_lists(self):
 
