@@ -19,7 +19,6 @@ class MyAccount:
             'apiKey': self.public_key,
             'secret': self.secret,
         })
-        print(f'I initiated the exchange: {self.exchange}')
 
         self.file_name = "monitor_your_balance.csv"
         self.sleep_time = 600
@@ -101,7 +100,7 @@ class MyAccount:
 
         # only for view
         columns = ['asset', 'recent_quotes', 'balance_in_usdt']
-        print(f"Balances:\n {df[columns]}")
+        # print(f"Balances:\n {df[columns]}")
 
         balance_for_all_assets = df['balance_in_usdt'].sum()
         return balance_for_all_assets

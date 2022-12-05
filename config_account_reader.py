@@ -1,5 +1,4 @@
 import yaml
-from stellar_sdk import Asset
 
 
 class ConfigAccountReader:
@@ -40,4 +39,3 @@ class ConfigAccountReader:
     def get_secret_key(self):
         secret_key = self.account_config['ACCOUNT']['SECRET_KEY']
         return secret_key
-    
