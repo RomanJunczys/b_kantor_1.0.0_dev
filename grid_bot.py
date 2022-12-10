@@ -4,6 +4,7 @@ from colors import Colors
 from config_account_reader import ConfigAccountReader
 from config_strategy_reader import ConfigStrategyReader
 from my_account import MyAccount
+from grid_properties import GridProperties
 import ccxt
 import time
 import os
@@ -28,11 +29,18 @@ class GridBot:
         self.symbol = config_account_reader.get_market_symbol()
 
         self.config_strategy_reader = ConfigStrategyReader('config_strategy.yaml')
-        self.closed_order_status = self.config_strategy_reader.get_filled_order_status()
+        self.filled_order_status = self.config_strategy_reader.get_filled_order_status()
         self.canceled_order_status = self.config_strategy_reader.get_canceled_order_status()
+
         self.check_orders_frequency = self.config_strategy_reader.get_check_orders_frequency()
-        self.grid_size = self.config_strategy_reader.get_grid_size()
+
+        self.time_between_grid_update = self.config_strategy_reader.get_time_between_grid_update()
+        self.time_between_next_try = self.config_strategy_reader.get_time_between_next_try()
+
         self.position_size = self.config_strategy_reader.get_position_size()
+
+        self.grid_properties = GridProperties()
+        self.grid_size = self.config_strategy_reader.get_grid_size()
 
         self.file_name = 'bot_life_cycle.csv'
 
@@ -57,7 +65,7 @@ class GridBot:
     def bot_life_cycle(self):
 
         # bot life cycle monitoring
-        self.set_file_name(self.file_name)
+        self.set_file_name('bot_life_cycle.csv')
         self.write_header()
 
         end_of_life_cycle = False
@@ -72,13 +80,24 @@ class GridBot:
 
         self.create_initial_buy_and_sell_orders()
 
+        start = time.perf_counter()  # for update grid
+
         while not end_of_life_cycle:
+
             self.checking_for_open_buy_orders()
             self.checking_for_open_sell_orders()
 
             self.clean_orders_lists()
 
             end_of_life_cycle, type_of_terminate, message = self.check_bot_termination_condition()
+
+            end = time.perf_counter()
+            elapsed_time = end - start
+
+            if elapsed_time > self.time_between_grid_update:
+                Colors.print_green(f"Elapsed {elapsed_time} secs. Grid update for size: {self.grid_size}")
+                self.update_grid()
+                start = time.perf_counter()
 
         Colors.print_red(f'End of life cycle {message}')
 
@@ -87,6 +106,10 @@ class GridBot:
         self.save_the_final_state()
 
         return type_of_terminate
+
+    def update_grid(self):
+        self.cancel_all_orders_at_the_end()
+        self.create_initial_buy_and_sell_orders()
 
     def checking_for_open_buy_orders(self):
 
@@ -100,7 +123,7 @@ class GridBot:
 
             order_info = order['info']
 
-            if order_info['status'] == self.closed_order_status:
+            if order_info['status'] == self.filled_order_status:
                 self.closed_order_ids.append(order['id'])
 
                 # monitoring of cycle of life
@@ -110,17 +133,25 @@ class GridBot:
                 Colors.print_green(f'BUY order filled / executed at {price}')
 
                 new_sell_price = price + self.grid_size
-                self.create_limit_sell_order(new_sell_price)
+                self.try_create_limit_sell_order(new_sell_price)
 
             if order_info['status'] == self.canceled_order_status:
                 self.closed_order_ids.append(order['id'])
 
-    def create_limit_sell_order(self, new_sell_price):
+    def try_create_limit_sell_order(self, new_sell_price):
 
-        Colors.print_blue(f'creating new limit sell order at {new_sell_price:.4f}')
+        Colors.print_blue(f'Creating new limit sell order at {new_sell_price:.4f}')
 
-        new_sell_order = self.exchange.create_limit_sell_order(self.symbol, self.position_size, new_sell_price)
-        self.sell_orders.append(new_sell_order)
+        while True:
+            try:
+                new_sell_order = self.exchange.create_limit_sell_order(self.symbol, self.position_size, new_sell_price)
+                self.sell_orders.append(new_sell_order)
+                break
+            except Exception as ex:
+                Colors.print_red(f'In {self.try_create_limit_sell_order.__name__} '
+                                 f'Exception occurred {Colors.BOLD}{ex}')
+                time.sleep(self.time_between_next_try)
+                continue
 
     def checking_for_open_sell_orders(self):
 
@@ -134,7 +165,7 @@ class GridBot:
 
             order_info = order['info']
 
-            if order_info['status'] == self.closed_order_status:
+            if order_info['status'] == self.filled_order_status:
                 self.closed_order_ids.append(order['id'])
 
                 # monitoring of cycle of life
@@ -144,37 +175,25 @@ class GridBot:
 
                 Colors.print_purple(f'SELL order filled / executed at {order_info["price"]}')
                 new_buy_price = price - self.grid_size
-                self.create_limit_buy_order(new_buy_price)
+                self.try_create_limit_buy_order(new_buy_price)
 
             if order_info['status'] == self.canceled_order_status:
                 self.closed_order_ids.append(order['id'])
 
-    def write_filled_order(self, order):
+    def try_create_limit_buy_order(self, new_buy_price):
 
-        print(f'order: \n\n'
-              f'{order}')
+        Colors.print_blue(f'Creating new limit BUY order at {new_buy_price:.4f}')
 
-        # date = order['datetime']
-        date = pd.to_datetime(int(order['info']['updateTime']), unit='ms')
-        market = order['symbol']
-        type_ = order['info']['side']
-        price = order['price']
-        amount = order['amount']
-        total = order['cost']
-        fee = 0.0
-        fee_coin = '_BNB_'
-
-        # count
-        balance = self.get_balance_of_bot()
-
-        self.write_transaction(date, market, type_, price, amount, total, fee, fee_coin, balance)
-
-    def create_limit_buy_order(self, new_buy_price):
-
-        Colors.print_blue(f'creating new limit BUY order at {new_buy_price:.4f}')
-
-        new_buy_order = self.exchange.create_limit_buy_order(self.symbol, self.position_size, new_buy_price)
-        self.buy_orders.append(new_buy_order)
+        while True:
+            try:
+                new_buy_order = self.exchange.create_limit_buy_order(self.symbol, self.position_size, new_buy_price)
+                self.buy_orders.append(new_buy_order)
+                break
+            except Exception as ex:
+                Colors.print_red(f'In {self.try_create_limit_buy_order.__name__} '
+                                 f'Exception occurred {Colors.BOLD}{ex}')
+                time.sleep(self.time_between_next_try)
+                continue
 
     def clean_orders_lists(self):
 
@@ -206,8 +225,9 @@ class GridBot:
                 order = self.exchange.fetch_order(id_order, symbol)
                 return order
             except Exception as ex:
-                print(f'Exception occured {ex}')
-                time.sleep(self.check_orders_frequency)
+                print(f'In {GridBot.try_fetch_order.__name__}'
+                      f'Exception occured {ex}')
+                time.sleep(self.time_between_next_try)
                 continue
 
     def buy_or_sell_to_balance(self):
@@ -219,12 +239,12 @@ class GridBot:
 
         free_base, locked_base = my_account.get_balance_for_asset(base_name)
         total_base = free_base + locked_base
-        Colors.print_blue(f'Asset: {base_name} balance is {total_base}.'
-                          f'                   - Details:  free: {free_base} locked: {locked_base}')
+        Colors.print_blue(f'Asset: {base_name} balance is {total_base:.7f}.'
+                          f'             - Details:  free: {free_base} locked: {locked_base}')
 
         free_counter, locked_counter = my_account.get_balance_for_asset(counter_name)
         total_counter = free_counter + locked_counter
-        Colors.print_blue(f'Asset: {counter_name} balance is {total_counter}:'
+        Colors.print_blue(f'Asset: {counter_name} balance is {total_counter:.4f}:'
                           f'              - Details: free: {free_counter} locked: {locked_counter}')
 
         ticker = self.try_fetch_ticker(self.symbol)
@@ -240,22 +260,33 @@ class GridBot:
         Colors.print_blue(f'Total in base: {Colors.BOLD}{total_in_base:.5f} in [{base_name}]')
         Colors.print_blue(f'Total in counter: {Colors.BOLD}{total_in_counter:.2f} in [{counter_name}]')
 
-        min_amount_in_counter = 10.1  # USDT
+        # min amount for order for counter
+        # ticker = self.try_fetch_ticker(f'{counter_name}/USDT')
+        # print(ticker)
+        # counter_to_usdt = float(ticker['last'])
+        counter_to_usdt = 1.0
+
+        min_amount_in_counter = 10.0/counter_to_usdt  # TODO min in counter USDT
         min_amount_in_base = min_amount_in_counter / last_value
+
+        Colors.print_cyan(f'min_amount_in_counter: {min_amount_in_counter:.6f} {counter_name}')
+        Colors.print_cyan(f'min_amount_in_base: {min_amount_in_base:.6f} {base_name}')
 
         if total_base * last_value < total_counter:
             half = total_in_base / 2.0
             need_buy = half - total_base
             Colors.print_cyan(f'   Need buy {need_buy:.6f} {base_name}')
             if need_buy > min_amount_in_base:
-                self.exchange.create_market_buy_order(self.symbol, need_buy)
+                order = self.try_create_market_buy_order(need_buy)
+                Colors.print_blue(f"Replenish Base [{base_name}] {order['info']['executedQty']}")
 
         elif total_base * last_value >= total_counter:
             half = total_in_base / 2.0
             need_sell = total_base - half
             Colors.print_cyan(f'   Need sell {need_sell:.6f} {base_name}')
             if need_sell > min_amount_in_base:
-                self.exchange.create_market_sell_order(self.symbol, need_sell)
+                order = self.try_create_market_sell_order(need_sell)
+                Colors.print_blue(f"Reduce Base [{base_name}] {order['info']['executedQty']}")
 
     def try_fetch_ticker(self, symbol):
         while True:
@@ -263,28 +294,34 @@ class GridBot:
                 ticker = self.exchange.fetch_ticker(symbol)
                 return ticker
             except Exception as ex:
-                Colors.print_red(f'Exception occurred: {Colors.BOLD}{ex}')
+                Colors.print_red(f'In {self.try_fetch_ticker.__name__} '
+                                 f'Exception occurred: {Colors.BOLD}{ex}')
+                time.sleep(self.time_between_next_try)
                 continue
 
-    def get_balance_of_bot(self):
+    def try_create_market_buy_order(self, need_buy):
+        while True:
+            try:
+                order = self.exchange.create_market_buy_order(self.symbol, need_buy)
+                return order
+            except Exception as ex:
+                Colors.print_red(f'In {self.try_create_market_buy_order.__name__} '
+                                 f'Exception occurred: {Colors.BOLD}{ex}')
+                continue
 
-        base_name, counter_name = self.symbol.split('/')
-
-        my_account = MyAccount(self.exchange_name, self.public_key, self.secret)
-
-        free_base, locked_base = my_account.get_balance_for_asset(base_name)
-        total_base = free_base + locked_base
-
-        free_counter, locked_counter = my_account.get_balance_for_asset(counter_name)
-        total_counter = free_counter + locked_counter
-
-        ticker = self.try_fetch_ticker(self.symbol)
-        last_value = float(ticker['last'])
-
-        total_in_counter = total_base * last_value + total_counter
-        return total_in_counter
+    def try_create_market_sell_order(self, need_sell):
+        while True:
+            try:
+                order = self.exchange.create_market_sell_order(self.symbol, need_sell)
+                return order
+            except Exception as ex:
+                Colors.print_red(f'In {self.try_create_market_sell_order.__name__} '
+                                 f'Exception occurred: {Colors.BOLD}{ex}')
+                continue
 
     def create_initial_buy_and_sell_orders(self):
+
+        self.grid_size = self.grid_properties.get_spacing_for_hour()
 
         num_buy_grid_lines = self.config_strategy_reader.get_num_buy_grid_lines()
         num_sell_grid_lines = self.config_strategy_reader.get_num_sell_grid_lines()
@@ -292,20 +329,19 @@ class GridBot:
 
         for i in range(num_sell_grid_lines):
             price = float(ticker['bid']) + (self.grid_size * (i + 1))
-            Colors.print_purple(f'   Submitting limit SELL order at {price:.4f}')
+            Colors.print_purple(f'   Submitting limit SELL order size {self.position_size} at {price:.4f}')
             order = self.exchange.create_limit_sell_order(self.symbol, self.position_size, price)
             self.sell_orders.append(order)
 
         for i in range(num_buy_grid_lines):
             price = float(ticker['bid']) - (self.grid_size * (i + 1))
-            Colors.print_green(f'   Submitting limit BUY order at {price:.4f}')
+            Colors.print_green(f'   Submitting limit BUY order size {self.position_size} at {price:.4f}')
             order = self.exchange.create_limit_buy_order(self.symbol, self.position_size, price)
             self.buy_orders.append(order)
 
     def cancel_all_orders_on_startup(self):
 
         self.try_fetch_orders_and_fill_buy_sell_orders()
-        time.sleep(1)
         self.cancel_all_orders_in_list()
 
     def cancel_all_orders_at_the_end(self):
@@ -322,7 +358,9 @@ class GridBot:
                 orders = self.exchange.fetch_orders(self.symbol)
                 break
             except Exception as ex:
-                Colors.print_red(f'Exception occurred {Colors.BOLD}{ex}')
+                Colors.print_red(f'In {GridBot.try_fetch_orders_and_fill_buy_sell_orders.__name__} '
+                                 f'Exception occurred {Colors.BOLD}{ex}')
+                time.sleep(self.time_between_next_try)
                 continue
 
         for order in orders:
@@ -350,9 +388,47 @@ class GridBot:
                 order = self.exchange.cancel_order(id_order, symbol)
                 return order
             except Exception as ex:
-                print(f'Exception occured {ex}')
-                time.sleep(self.check_orders_frequency)
+                Colors.print_red(f'In {self.try_cancel_order.__name__} '
+                                 f'{Colors.BOLD}Exception occurred {ex}')
+                time.sleep(self.time_between_next_try)
                 continue
+
+    def get_balance_of_bot(self):
+
+        base_name, counter_name = self.symbol.split('/')
+
+        my_account = MyAccount(self.exchange_name, self.public_key, self.secret)
+
+        free_base, locked_base = my_account.get_balance_for_asset(base_name)
+        total_base = free_base + locked_base
+
+        free_counter, locked_counter = my_account.get_balance_for_asset(counter_name)
+        total_counter = free_counter + locked_counter
+
+        ticker = self.try_fetch_ticker(self.symbol)
+        last_value = float(ticker['last'])
+
+        total_in_counter = total_base * last_value + total_counter
+        return total_in_counter
+
+    def write_filled_order(self, order):
+
+        # print(f' Order: {order}')
+
+        # date = order['datetime']
+        date = pd.to_datetime(int(order['info']['updateTime']), unit='ms')
+        market = order['symbol']
+        type_ = order['info']['side']
+        price = order['price']
+        amount = order['amount']
+        total = order['cost']
+        fee = 0.0
+        fee_coin = '_BNB_'
+
+        # count
+        balance = self.get_balance_of_bot()
+
+        self.write_transaction(date, market, type_, price, amount, total, fee, fee_coin, balance)
 
     def set_file_name(self, file_name):
         current_time = str(datetime.datetime.now())

@@ -57,3 +57,11 @@ class ConfigStrategyReader:
     def get_grid_size(self):
         grid_size = float(self.strategy_config['GRID_BOT']['GRID_SIZE'])
         return grid_size
+
+    def get_time_between_grid_update(self):
+        time_between_grid_update = float(self.strategy_config['TIMING']['BETWEEN_GIRD_UPDATE'])
+        return time_between_grid_update
+
+    def get_time_between_next_try(self):
+        time_between_next_try = float(self.strategy_config['TIMING']['BETWEEN_NEXT_TRY'])
+        return time_between_next_try

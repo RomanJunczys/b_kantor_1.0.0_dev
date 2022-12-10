@@ -100,7 +100,7 @@ class MyAccount:
 
         # only for view
         columns = ['asset', 'recent_quotes', 'balance_in_usdt']
-        # print(f"Balances:\n {df[columns]}")
+        print(f"Balances:\n {df[columns]}")
 
         balance_for_all_assets = df['balance_in_usdt'].sum()
         return balance_for_all_assets
